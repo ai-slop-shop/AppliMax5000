@@ -4,6 +4,8 @@ Upload your resume, plug in your Claude API key, and it will try to help you fin
 
 Did it get me a job when I tried it?  No.  Will it get you a job?  Probably not.  Either way, I figured they are using AI to gatekeep us; we might as well use it to try to pick the lock.
 
+![Onboarding](docs/onboarding.png)
+
 ## Requirements
 
 - macOS
