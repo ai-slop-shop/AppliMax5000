@@ -1,0 +1,128 @@
+import { contextBridge, ipcRenderer } from 'electron'
+import type { ExportFormat, ParseIssue, Resume } from '../shared/resume'
+import type { DraftSummary, Fact, PostingInput, TailoredDraft } from '../shared/tailor'
+import type { PastApplication } from '../main/history'
+import type { Digest, ExperimentSettings, ExperimentStats, Outcome } from '../shared/experiment'
+import type { EssayDraft, Story } from '../shared/tailor'
+import type { QuestionRow, ScanResult } from '../shared/apply'
+import type { Answer, ApplicationRow, ApplyPlan, FillResult, SubmitResult } from '../shared/apply'
+import type { AppChoice, EmailAccount, EmailConnect, EmailEvent, ScanSummary } from '../shared/email'
+import type { SearchResult, SearchSettings, PendingApproval, AutopilotSettings, AutopilotStatus, BriefApplied, BriefProposal, BriefSelection, SearchBrief, SetupResult, Board, Criteria, DiscoveryStatus, DraftSeed, JobRow, RunSummary, Schedule } from '../shared/discovery'
+
+const api = {
+  savedResumeSource: (): Promise<{ path: string; text: string } | null> => ipcRenderer.invoke('resume:source'),
+  /** Main asks the UI to save anything pending (on hide and before quit). The handler's completion is acknowledged. */
+  onFlush: (cb: () => Promise<void>): void => {
+    ipcRenderer.on('app:flush', () => { cb().catch(() => {}).finally(() => ipcRenderer.send('flush:done')) })
+  },
+  pickResume: (): Promise<{ path: string; text: string } | null> => ipcRenderer.invoke('resume:pick'),
+  structureResume: (text: string): Promise<Resume> => ipcRenderer.invoke('resume:structure', text),
+  loadResume: (): Promise<Resume> => ipcRenderer.invoke('resume:load'),
+  saveResume: (r: Resume): Promise<Resume> => ipcRenderer.invoke('resume:save', r),
+  plainText: (r: Resume): Promise<string> => ipcRenderer.invoke('resume:plainText', r),
+  exportResume: (f: ExportFormat, draftId?: number): Promise<{ path: string; issues: ParseIssue[] } | null> => ipcRenderer.invoke('resume:export', f, draftId),
+  listFacts: (): Promise<Fact[]> => ipcRenderer.invoke('facts:list'),
+  addFact: (t: string): Promise<Fact[]> => ipcRenderer.invoke('facts:add', t),
+  updateFact: (id: number, text: string, confirmed: boolean): Promise<Fact[]> => ipcRenderer.invoke('facts:update', id, text, confirmed),
+  confirmAllFacts: (): Promise<Fact[]> => ipcRenderer.invoke('facts:confirmAll'),
+  generateFacts: (): Promise<{ facts: Fact[]; added: number; dropped: number }> => ipcRenderer.invoke('facts:generate'),
+  removeFact: (id: number): Promise<Fact[]> => ipcRenderer.invoke('facts:remove', id),
+  generateDraft: (p: PostingInput, opts?: { forceTailored?: boolean }): Promise<TailoredDraft> => ipcRenderer.invoke('tailor:generate', p, opts),
+  listDrafts: (): Promise<DraftSummary[]> => ipcRenderer.invoke('tailor:list'),
+  getDraft: (id: number): Promise<TailoredDraft> => ipcRenderer.invoke('tailor:get', id),
+  updateDraft: (d: TailoredDraft): Promise<TailoredDraft> => ipcRenderer.invoke('tailor:update', d),
+  deleteDraft: (id: number): Promise<DraftSummary[]> => ipcRenderer.invoke('tailor:delete', id),
+  approveDraft: (id: number): Promise<TailoredDraft> => ipcRenderer.invoke('tailor:approve', id),
+  setApiKey: (k: string): Promise<void> => ipcRenderer.invoke('secret:set', k),
+  hasApiKey: (): Promise<boolean> => ipcRenderer.invoke('secret:has'),
+  listAnswers: (): Promise<Answer[]> => ipcRenderer.invoke('answers:list'),
+  addAnswer: (p: string, a: string): Promise<Answer[]> => ipcRenderer.invoke('answers:add', p, a),
+  removeAnswer: (id: number): Promise<Answer[]> => ipcRenderer.invoke('answers:remove', id),
+  listQuestions: (inc = false): Promise<QuestionRow[]> => ipcRenderer.invoke('questions:list', inc),
+  answerQuestion: (id: number, v: string): Promise<QuestionRow[]> => ipcRenderer.invoke('questions:answer', id, v),
+  dismissQuestion: (id: number, d: boolean): Promise<QuestionRow[]> => ipcRenderer.invoke('questions:dismiss', id, d),
+  consolidateQuestions: (): Promise<{ merged: number; years: number; analyzed: number; note: string }> => ipcRenderer.invoke('questions:consolidate'),
+  scanQuestions: (): Promise<ScanResult> => ipcRenderer.invoke('questions:scan'),
+  suggestAnswers: (): Promise<{ questions: QuestionRow[]; suggested: number }> => ipcRenderer.invoke('questions:suggest'),
+  listStories: (): Promise<Story[]> => ipcRenderer.invoke('stories:list'),
+  saveStory: (s: { id?: number; title: string; body: string; tags: string }): Promise<Story[]> => ipcRenderer.invoke('stories:save', s),
+  removeStory: (id: number): Promise<Story[]> => ipcRenderer.invoke('stories:remove', id),
+  draftEssay: (draftId: number, field: string): Promise<EssayDraft> => ipcRenderer.invoke('essay:draft', draftId, field),
+  previousEmployers: (): Promise<string[]> => ipcRenderer.invoke('employers:list'),
+  listPast: (): Promise<PastApplication[]> => ipcRenderer.invoke('past:list'),
+  addPast: (p: { company: string; title: string; url: string; applied_at?: string; note?: string }): Promise<{ list: PastApplication[]; skipped: number }> => ipcRenderer.invoke('past:add', p),
+  importPast: (text: string): Promise<{ list: PastApplication[]; added: number; skipped: number }> => ipcRenderer.invoke('past:import', text),
+  removePast: (id: number): Promise<PastApplication[]> => ipcRenderer.invoke('past:remove', id),
+  getExperiment: (): Promise<ExperimentSettings> => ipcRenderer.invoke('experiment:get'),
+  setExperiment: (s: ExperimentSettings): Promise<ExperimentSettings> => ipcRenderer.invoke('experiment:set', s),
+  experimentStats: (): Promise<ExperimentStats> => ipcRenderer.invoke('experiment:stats'),
+  getDigest: (): Promise<Digest> => ipcRenderer.invoke('digest:get'),
+  setOutcome: (id: number, o: Outcome): Promise<void> => ipcRenderer.invoke('applications:outcome', id, o),
+  applyPlan: (id: number, overrides: Record<string, string>, remember: string[]): Promise<ApplyPlan> => ipcRenderer.invoke('apply:plan', id, overrides, remember),
+  confirmSuggested: (id: number, names: string[], overrides: Record<string, string>): Promise<ApplyPlan> => ipcRenderer.invoke('apply:confirmSuggested', id, names, overrides),
+  applyFill: (id: number, overrides: Record<string, string>, approvals: Record<string, boolean>, allowCooldown: boolean, remember: string[] = []): Promise<FillResult> =>
+    ipcRenderer.invoke('apply:fill', id, overrides, approvals, allowCooldown, remember),
+  applyCode: (): Promise<SubmitResult> => ipcRenderer.invoke('apply:code'),
+  acceptChanges: (names: string[], save: string[]): Promise<{ result: FillResult; saved: number }> => ipcRenderer.invoke('apply:accept', names, save),
+  applyReverify: (): Promise<FillResult> => ipcRenderer.invoke('apply:reverify'),
+  applySubmit: (acknowledgeUnreadable = false): Promise<SubmitResult> => ipcRenderer.invoke('apply:submit', acknowledgeUnreadable),
+  applyCheck: (): Promise<SubmitResult> => ipcRenderer.invoke('apply:check'),
+  applyClose: (): Promise<void> => ipcRenderer.invoke('apply:close'),
+  listApplications: (): Promise<ApplicationRow[]> => ipcRenderer.invoke('applications:list'),
+  listBoards: (): Promise<Board[]> => ipcRenderer.invoke('boards:list'),
+  addBoard: (url: string, source?: 'manual' | 'suggested'): Promise<Board[]> => ipcRenderer.invoke('boards:add', url, source),
+  emailAccount: (): Promise<EmailAccount> => ipcRenderer.invoke('email:account'),
+  connectEmail: (c: EmailConnect): Promise<EmailAccount> => ipcRenderer.invoke('email:connect', c),
+  connectOutlook: (clientId: string): Promise<EmailAccount> => ipcRenderer.invoke('email:outlook', clientId),
+  cancelOutlook: (): Promise<void> => ipcRenderer.invoke('email:outlookCancel'),
+  disconnectEmail: (purge: boolean): Promise<EmailAccount> => ipcRenderer.invoke('email:disconnect', purge),
+  setEmailOptions: (o: { autoScan?: boolean; autoApply?: boolean; autoCode?: boolean }): Promise<EmailAccount> => ipcRenderer.invoke('email:options', o),
+  scanEmail: (days: number | null): Promise<ScanSummary> => ipcRenderer.invoke('email:scan', days),
+  emailEvents: (): Promise<{ events: EmailEvent[]; apps: AppChoice[] }> => ipcRenderer.invoke('email:events'),
+  assignEmail: (id: number, appId: number | null): Promise<EmailEvent[]> => ipcRenderer.invoke('email:assign', id, appId),
+  applyEmail: (id: number): Promise<EmailEvent[]> => ipcRenderer.invoke('email:apply', id),
+  undoEmail: (id: number): Promise<EmailEvent[]> => ipcRenderer.invoke('email:undo', id),
+  addEmailToPast: (id: number): Promise<EmailEvent[]> => ipcRenderer.invoke('email:addPast', id),
+  getBrief: (): Promise<SearchBrief> => ipcRenderer.invoke('brief:get'),
+  setBrief: (t: string): Promise<SearchBrief> => ipcRenderer.invoke('brief:set', t),
+  proposeFromBrief: (request: string | null): Promise<BriefProposal> => ipcRenderer.invoke('brief:propose', request),
+  applyBrief: (sel: BriefSelection): Promise<BriefApplied> => ipcRenderer.invoke('brief:apply', sel),
+  hasResumeUndo: (): Promise<boolean> => ipcRenderer.invoke('resume:hasUndo'),
+  undoResumeRewrite: (): Promise<Resume> => ipcRenderer.invoke('resume:undoRewrite'),
+  revertFact: (id: number): Promise<Fact[]> => ipcRenderer.invoke('facts:revert', id),
+  setupFromResume: (): Promise<SetupResult> => ipcRenderer.invoke('setup:run'),
+  getSearch: (): Promise<SearchSettings> => ipcRenderer.invoke('search:get'),
+  setSearch: (s: Partial<SearchSettings>): Promise<SearchSettings> => ipcRenderer.invoke('search:set', s),
+  setAdzunaKey: (id: string, key: string): Promise<SearchSettings> => ipcRenderer.invoke('search:adzuna', id, key),
+  searchSites: (): Promise<SearchResult> => ipcRenderer.invoke('search:run'),
+  removeBoard: (id: number): Promise<Board[]> => ipcRenderer.invoke('boards:remove', id),
+  toggleBoard: (id: number, on: boolean): Promise<Board[]> => ipcRenderer.invoke('boards:toggle', id, on),
+  getCriteria: (): Promise<Criteria> => ipcRenderer.invoke('criteria:get'),
+  setCriteria: (c: Criteria): Promise<Criteria> => ipcRenderer.invoke('criteria:set', c),
+  getSchedule: (): Promise<Schedule> => ipcRenderer.invoke('schedule:get'),
+  setSchedule: (s: Schedule): Promise<Schedule> => ipcRenderer.invoke('schedule:set', s),
+  pendingApprovals: (): Promise<PendingApproval[]> => ipcRenderer.invoke('approvals:list'),
+  resolveApproval: (a: { kind: 'consent' | 'answer'; company: string; question: string; value: string }): Promise<PendingApproval[]> => ipcRenderer.invoke('approvals:resolve', a),
+  autopilotStatus: (): Promise<AutopilotStatus> => ipcRenderer.invoke('autopilot:status'),
+  setAutopilot: (s: AutopilotSettings): Promise<AutopilotStatus> => ipcRenderer.invoke('autopilot:set', s),
+  runAutopilot: (): Promise<{ submitted: number; needsYou: number; dryRuns: number; summary: string; status: AutopilotStatus }> => ipcRenderer.invoke('autopilot:run'),
+  releaseHolds: (): Promise<AutopilotStatus> => ipcRenderer.invoke('autopilot:release'),
+  runDiscovery: (): Promise<RunSummary> => ipcRenderer.invoke('discovery:run'),
+  discoveryStatus: (): Promise<DiscoveryStatus> => ipcRenderer.invoke('discovery:status'),
+  listJobs: (f: 'active' | 'applied' | 'skipped' | 'all'): Promise<JobRow[]> => ipcRenderer.invoke('jobs:list', f),
+  markJobApplied: (id: number, date?: string): Promise<{ skipped: number }> => ipcRenderer.invoke('jobs:markApplied', id, date),
+  unmarkJobApplied: (id: number): Promise<void> => ipcRenderer.invoke('jobs:unmarkApplied', id),
+  skipJob: (id: number, reason: string): Promise<void> => ipcRenderer.invoke('jobs:skip', id, reason),
+  restoreJob: (id: number): Promise<void> => ipcRenderer.invoke('jobs:restore', id),
+  draftSeed: (id: number): Promise<DraftSeed> => ipcRenderer.invoke('jobs:draft', id),
+  recheckBlockers: (): Promise<number> => ipcRenderer.invoke('jobs:recheck'),
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:open', url),
+  on: (channel: 'discovery:phase' | 'discovery:done' | 'nav:tab' | 'setup:phase', cb: (arg: string) => void): (() => void) => {
+    const h = (_e: unknown, arg: string): void => cb(arg)
+    ipcRenderer.on(channel, h)
+    return () => { ipcRenderer.removeListener(channel, h) }
+  },
+  openBrowser: (url: string): Promise<void> => ipcRenderer.invoke('browser:open', url)
+}
+contextBridge.exposeInMainWorld('api', api)
+export type Api = typeof api
